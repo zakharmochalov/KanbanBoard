@@ -1,8 +1,179 @@
 ﻿@{
-    ViewData["Title"] = "Home Page";
+    Layout = null;
 }
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>KanbanBoard</title>
+    <link rel="icon" href="~/favicon.ico" />
+    <style>
+        body { background: #d4d0c8; font-family: Tahoma, Verdana, Arial, sans-serif; font-size: 14px; width: 1000px; margin: 15px auto; }
+        input, button { font-family: inherit; font-size: 14px; padding: 3px 6px; }
+        h1 { font-size: 32px; margin: 0 0 8px 0; }
+        table.board { width: 100%; border-collapse: collapse; background: #fff; }
+        table.board th { background: #000080; color: #fff; text-align: left; padding: 5px 8px; border: 1px solid #000; }
+        table.board td { vertical-align: top; border: 1px solid #000; padding: 6px; height: 450px; width: 33%; }
+        table.board td.over { background: #ffffcc; }
+        .task { list-style: none; border: 1px solid #808080; background: #f0f0f0; padding: 6px 8px; margin-bottom: 6px; cursor: move; }
+        .task.locked { cursor: default; background: #e8e8e8; color: #808080; }
+        .task.locked b { text-decoration: line-through; }
+        .meta { color: #555; font-size: 12px; margin-top: 3px; }
+        .meta a { color: #c00000; }
+        ul.cards { margin: 0; padding: 0; }
+        .form { border: 1px solid #808080; padding: 8px; margin-bottom: 10px; }
+        .note { background: #ffffe1; border: 1px solid #000; padding: 2px 6px; margin-bottom: 4px; }
+        #notify { min-height: 20px; margin: 4px 0 8px 0; }
+        hr { border: 0; border-top: 1px solid #808080; }
+    </style>
+</head>
+<body>
+    <h1>Доска задач</h1>
+    <div>Пользователей онлайн: <b id="online">0</b></div>
+    <hr/>
+    <div class="form">
+        <table>
+            <tr>
+                <td>Ваше имя:</td>
+                <td><input id="author" size="25" maxlength="30" /></td>
+            </tr>
+            <tr>
+                <td>Новая задача:</td>
+                <td><input id="title" size="70" maxlength="100" /></td>
+                <td><button id="addBtn">Добавить</button></td>
+            </tr>
+        </table>
+    </div>
 
-<div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-    <p>Learn about <a href="https://learn.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
-</div>
+
+    <div id="notify"></div>
+
+    <table class="board">
+        <tr>
+            <th>К выполнению (<span class="count">0</span>)</th>
+            <th>В работе (<span class="count">0</span>)</th>
+            <th>Готово (<span class="count">0</span>)</th>
+        </tr>
+        <tr>
+            <td class="column" data-status="todo"><ul class="cards"></ul></td>
+            <td class="column" data-status="in_progress"><ul class="cards"></ul></td>
+            <td class="column" data-status="done"><ul class="cards"></ul></td>
+        </tr>
+    </table>
+
+
+    <script src="~/lib/microsoft/signalr/dist/browser/signalr.min.js"></script>
+    <script>
+        const hubConnection = new signalR.HubConnectionBuilder().withUrl("/board").withAutomaticReconnect().build();
+        const authorInput = document.getElementById("author");
+        authorInput.value = localStorage.getItem("boardAuthor") || "";
+        authorInput.onchange = () => localStorage.setItem("boardAuthor", authorInput.value.trim());
+        const author = () => authorInput.value.trim();
+
+        const column = status => document.querySelector(`.column[data-status="${status}"]`);
+
+        function createCard(c) {
+            const li = document.createElement("li");
+            li.className = "task";
+            li.id = "card-" + c.id;
+            setLocked(li, c.status === "done");
+            li.ondragstart = e => e.dataTransfer.setData("text/plain", c.id);
+
+            const title = document.createElement("b");
+            title.textContent = "#" + c.id + " " + c.title; 
+
+            const meta = document.createElement("div");
+            meta.className = "meta";
+            meta.textContent = "Автор: " + c.author + " | Создана: " + new Date(c.createdAt).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " | ";
+
+            const del = document.createElement("a");
+            del.href = "#";
+            del.textContent = "удалить";
+            del.onclick = e => { e.preventDefault(); hubConnection.invoke("DeleteCard", c.id, author()); };
+
+            const who = document.createElement("div");
+            who.className = "meta assignee";
+            who.textContent = "Исполнитель: " + (c.assignee || "не назначен");
+
+            meta.appendChild(del);
+            li.append(title, who, meta);
+            return li;
+        }
+
+        function setLocked(el, locked) {
+            el.draggable = !locked;
+            el.classList.toggle("locked", locked);
+        }
+
+        function updateCounts() {
+            const counts = document.querySelectorAll(".count");
+            document.querySelectorAll(".column").forEach((col, i) => {
+                counts[i].textContent = col.querySelectorAll(".task").length;
+            });
+        }
+
+        function notify(text) {
+            const div = document.createElement("div");
+            div.className = "note";
+            div.textContent = "[" + new Date().toLocaleTimeString("ru-RU") + "] " + text;
+            const box = document.getElementById("notify");
+            box.prepend(div);
+            while (box.children.length > 3) box.lastChild.remove();
+        }
+
+        document.querySelectorAll(".column").forEach(col => {
+            col.ondragover = e => { e.preventDefault(); col.classList.add("over"); };
+            col.ondragleave = () => col.classList.remove("over");
+            col.ondrop = e => {
+                e.preventDefault();
+                col.classList.remove("over");
+                const id = parseInt(e.dataTransfer.getData("text/plain"));
+                hubConnection.invoke("MoveCard", id, col.dataset.status, author());
+            };
+        });
+
+        hubConnection.on("Board", cards => {
+            document.querySelectorAll(".cards").forEach(c => c.innerHTML = "");
+            cards.forEach(c => column(c.status).querySelector(".cards").appendChild(createCard(c)));
+            updateCounts();
+        });
+
+        hubConnection.on("CardAdded", c => {
+            column(c.status).querySelector(".cards").appendChild(createCard(c));
+            updateCounts();
+        });
+
+        hubConnection.on("CardMoved", (id, status, assignee) => {
+            const el = document.getElementById("card-" + id);
+            if (el) {
+                el.querySelector(".assignee").textContent = "Исполнитель: " + (assignee || "не назначен");
+                setLocked(el, status === "done");
+                column(status).querySelector(".cards").appendChild(el);
+            }
+            updateCounts();
+        });
+
+        hubConnection.on("CardDeleted", id => {
+            const el = document.getElementById("card-" + id);
+            if (el) el.remove();
+            updateCounts();
+        });
+
+        hubConnection.on("Online", n => document.getElementById("online").textContent = n);
+
+        hubConnection.on("Notify", notify);
+
+        async function addCard() {
+            const input = document.getElementById("title");
+            const title = input.value.trim();
+            if (!title) return;
+            await hubConnection.invoke("AddCard", title, author());
+            input.value = "";
+        }
+        document.getElementById("addBtn").onclick = addCard;
+        document.getElementById("title").addEventListener("keydown", e => { if (e.key === "Enter") addCard(); });
+
+        hubConnection.start().catch(err => console.error(err.toString()));
+    </script>
+</body>
+</html>
