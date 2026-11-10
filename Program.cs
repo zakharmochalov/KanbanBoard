@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using KanbanBoard.Data;
+using KanbanBoard.Hubs;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -7,7 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllersWithViews();
 var connection = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));
-
+builder.Services.AddSignalR(options =>{options.EnableDetailedErrors = true;});
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -29,4 +31,5 @@ app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
 
+app.MapHub<BoardHub>("/board");
 app.Run();
