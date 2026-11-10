@@ -23,6 +23,10 @@ namespace KanbanBoard.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Assignee")
+                        .HasMaxLength(30)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Author")
                         .IsRequired()
                         .HasMaxLength(30)
